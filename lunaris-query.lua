@@ -70,12 +70,12 @@ function Lunaris.max(column)
 	return { column = column, type = "MAX", is_aggregation = true }
 end
 
-function Lunaris.raw(expression)
-	return { is_raw = true, expression = expression }
-end
-
 function Lunaris.sql(expression, ...)
 	return { is_sql = true, expression = expression, params = { ... } }
+end
+
+function Lunaris.now()
+	return Lunaris.sql("CURRENT_TIMESTAMP")
 end
 
 function Lunaris.placeholder(name)
@@ -103,7 +103,6 @@ function Lunaris.Query.prototype:compile_condition(condition)
 		end
 		return table.concat(parts, " " .. condition.junction .. " ")
 	end
-
 	if condition.column.is_sql then
 		for _, param in ipairs(condition.column.params) do
 			if type(param) == "table" and param.is_placeholder then
@@ -114,7 +113,6 @@ function Lunaris.Query.prototype:compile_condition(condition)
 		end
 		return condition.column.expression
 	end
-
 	local query_string = prefix_column(condition.column) .. " " .. condition.operator
 	if condition.operator == "IN" then
 		local placeholders = {}
@@ -240,10 +238,9 @@ function Lunaris.SelectQuery.prototype:build_query_string()
 				break
 			end
 		end
-
 		if is_map then
 			for alias, column_object in pairs(self._columns) do
-				if column_object.is_raw then
+				if column_object.is_sql then
 					table.insert(column_names, column_object.expression .. " AS " .. alias)
 				else
 					table.insert(column_names, prefix_column(column_object) .. " AS " .. alias)
@@ -251,7 +248,7 @@ function Lunaris.SelectQuery.prototype:build_query_string()
 			end
 		else
 			for _, column_object in ipairs(self._columns) do
-				if column_object.is_raw then
+				if column_object.is_sql then
 					table.insert(column_names, column_object.expression)
 				elseif column_object.is_aggregation then
 					local inner = column_object.column == "*" and "*" or prefix_column(column_object.column)
@@ -429,6 +426,12 @@ function Lunaris.InsertQuery.prototype:execute()
 	local column_names = {}
 	local all_placeholders = {}
 	for _, row in ipairs(rows) do
+		-- Apply Lua-based defaults
+		for _, column in ipairs(self._table._columns) do
+			if row[column.name] == nil and type(column._default) == "function" then
+				row[column.name] = column._default()
+			end
+		end
 		local row_placeholders = {}
 		for column_name, value in pairs(row) do
 			local actual_column = self._table[column_name]

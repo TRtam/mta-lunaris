@@ -1,7 +1,9 @@
 <meta>
 	<script src="lunaris-class.lua" type="server" />
 	<script src="lunaris.lua" type="server" />
+	<script src="lunaris-utils.lua" type="server" />
 	<script src="lunaris-promise.lua" type="server" />
 	<script src="lunaris-schema.lua" type="server" />
 	<script src="lunaris-query.lua" type="server" />
+	<script src="example.lua" type="server" />
 </meta>

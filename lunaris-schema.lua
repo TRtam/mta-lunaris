@@ -27,9 +27,8 @@ function Lunaris.Column.prototype:unique()
 	return self
 end
 
-function Lunaris.Column.prototype:default(value, is_raw)
+function Lunaris.Column.prototype:default(value)
 	self._default = value
-	self._is_raw_default = is_raw or false
 	return self
 end
 
@@ -43,12 +42,32 @@ function Lunaris.Column.prototype:references(foreign_table, foreign_column, acti
 	return self
 end
 
+function Lunaris.id(name)
+	return Lunaris.serial(name or "id")
+end
+
 function Lunaris.integer(name)
 	return Lunaris.Column(name, "INTEGER")
 end
 
+function Lunaris.tinyint(name)
+	return Lunaris.Column(name, "TINYINT")
+end
+
+function Lunaris.smallint(name)
+	return Lunaris.Column(name, "SMALLINT")
+end
+
+function Lunaris.bigint(name)
+	return Lunaris.Column(name, "BIGINT")
+end
+
 function Lunaris.varchar(name, config)
 	return Lunaris.Column(name, "VARCHAR", config)
+end
+
+function Lunaris.uuid(name)
+	return Lunaris.varchar(name or "uuid", { length = 36 })
 end
 
 function Lunaris.text(name)
@@ -71,7 +90,7 @@ Lunaris.Table = class()
 
 function Lunaris.Table.prototype:constructor(name, columns, configuration)
 	self._name = name
-	self._configuration = configuration or {}
+	self._configuration = configuration or { timestamps = true }
 	self._columns = columns
 	self._hooks = {
 		before_insert = {},
@@ -82,8 +101,14 @@ function Lunaris.Table.prototype:constructor(name, columns, configuration)
 		after_delete = {},
 	}
 	if self._configuration.timestamps then
-		table.insert(self._columns, Lunaris.timestamp("created_at"):not_null():default("CURRENT_TIMESTAMP", true))
-		table.insert(self._columns, Lunaris.timestamp("updated_at"):not_null():default("CURRENT_TIMESTAMP", true))
+		table.insert(
+			self._columns,
+			Lunaris.timestamp("created_at"):not_null():default(Lunaris.sql("CURRENT_TIMESTAMP"))
+		)
+		table.insert(
+			self._columns,
+			Lunaris.timestamp("updated_at"):not_null():default(Lunaris.sql("CURRENT_TIMESTAMP"))
+		)
 	end
 	for _, column in ipairs(self._columns) do
 		column.table = self
@@ -150,14 +175,19 @@ function Lunaris.Column.prototype:to_sql(driver)
 	end
 	if self._default ~= nil then
 		local default_expression = self._default
-		if not self._is_raw_default then
-			if type(default_expression) == "string" then
-				default_expression = "'" .. default_expression .. "'"
-			elseif type(default_expression) == "boolean" then
-				default_expression = default_expression and "1" or "0"
-			end
+		local should_add_default = true
+		if type(default_expression) == "table" and default_expression.is_sql then
+			default_expression = default_expression.expression
+		elseif type(default_expression) == "function" then
+			should_add_default = false
+		elseif type(default_expression) == "string" then
+			default_expression = "'" .. default_expression .. "'"
+		elseif type(default_expression) == "boolean" then
+			default_expression = default_expression and "1" or "0"
 		end
-		table.insert(sql_parts, "DEFAULT " .. default_expression)
+		if should_add_default then
+			table.insert(sql_parts, "DEFAULT " .. default_expression)
+		end
 	end
 	return table.concat(sql_parts, " ")
 end
@@ -189,8 +219,4 @@ function Lunaris.Table.prototype:to_sql(driver)
 		table.insert(column_sqls, fk)
 	end
 	return "CREATE TABLE IF NOT EXISTS " .. self._name .. " (" .. table.concat(column_sqls, ", ") .. ")"
-end
-
-function Lunaris.table_schema(name, columns, configuration)
-	return Lunaris.Table(name, columns, configuration)
 end

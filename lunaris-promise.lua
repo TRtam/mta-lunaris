@@ -167,11 +167,10 @@ function Lunaris.async(executor)
 	return function(...)
 		local task = coroutine.create(function(...)
 			local returned = executor(...)
-			TASKS_PROMISES[task] = nil
+			TASKS_PROMISES[coroutine.running()] = nil
 			return returned
 		end)
 		local promise, resolve, reject = Lunaris.Promise.deferred()
-		TASKS_PROMISES[task] = promise
 		local function step(...)
 			local success, result = coroutine._resume(task, ...)
 			if not success then
@@ -188,8 +187,18 @@ function Lunaris.async(executor)
 				step(result)
 			end
 		end
+		TASKS_PROMISES[task] = promise
 		step(...)
 		return promise
+	end
+end
+
+function Lunaris.throw(e)
+	local promise = TASKS_PROMISES[coroutine.running()]
+	if promise then
+		promise:reject(e)
+	else
+		error(tostring(e))
 	end
 end
 
@@ -200,20 +209,11 @@ function Lunaris.await(x)
 	if type(x) == "table" and x.next then
 		local result = coroutine.yield(x)
 		if x.state == "rejected" then
-			error(x.reason)
+			Lunaris.throw(x.reason)
 		end
 		return result
 	end
 	return x
-end
-
-function Lunaris.throw(e)
-	local promise = TASKS_PROMISES[coroutine.running()]
-	if promise then
-		promise:reject(e)
-	else
-		error(tostring(e))
-	end
 end
 
 function Lunaris.try(executor, catch, finally)

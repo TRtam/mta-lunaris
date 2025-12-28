@@ -66,7 +66,7 @@ function Lunaris.prototype:query(query_string, ...)
 	return Lunaris.Promise(function(resolve, reject)
 		local sql_string = dbPrepareString(self.connection, query_string, unpack(query_arguments))
 		if self.debug then
-			print("[Lunaris] " .. sql_string)
+			print(sql_string)
 		end
 		local query_handle
 		local timer
@@ -83,7 +83,6 @@ function Lunaris.prototype:query(query_string, ...)
 				resolve(result)
 			end
 		end, self.connection, sql_string)
-
 		local timeout = self.timeout_ms or 10000
 		timer = setTimer(function()
 			if query_handle then
