@@ -20,6 +20,18 @@ function Lunaris.Promise.reject(reason)
 	end)
 end
 
+function Lunaris.Promise.timeout(executor, interval, reason)
+	local promise, resolve, reject = Lunaris.Promise.deferred()
+	setTimer(function()
+		reject(reason or "timeout")
+	end, interval, 1)
+	local success, result = pcall(executor, resolve, reject)
+	if not success then
+		reject(result)
+	end
+	return promise
+end
+
 function Lunaris.Promise.all(promises)
 	return Lunaris.Promise(function(resolve, reject)
 		local results = {}
@@ -111,34 +123,34 @@ function Lunaris.Promise.prototype:next(on_fulfilled, on_rejected, on_finally)
 			error(reason)
 		end
 	end
-	return Lunaris.Promise(function(resolve, reject)
-		local function create_handler(handler)
-			return function(value)
-				local success, result = pcall(handler, value)
-				if success then
-					resolve(result)
-				else
-					reject(result)
-				end
-				if type(on_finally) == "function" then
-					on_finally()
-				end
+	local promise, resolve, reject = Lunaris.Promise.deferred()
+	local function create_handler(handler)
+		return function(value)
+			local success, result = pcall(handler, value)
+			if success then
+				resolve(result)
+			else
+				reject(result)
 			end
-		end
-		local handle_fulfilled = create_handler(on_fulfilled)
-		local handle_rejected = create_handler(on_rejected)
-		if self.state == "fulfilled" then
-			handle_fulfilled(self.value)
-		elseif self.state == "rejected" then
-			handle_rejected(self.reason)
-		else
-			table.insert(self.handlers.fulfilled, handle_fulfilled)
-			table.insert(self.handlers.rejected, handle_rejected)
 			if type(on_finally) == "function" then
-				table.insert(self.handlers.finally, on_finally)
+				on_finally()
 			end
 		end
-	end)
+	end
+	local handle_fulfilled = create_handler(on_fulfilled)
+	local handle_rejected = create_handler(on_rejected)
+	if self.state == "fulfilled" then
+		handle_fulfilled(self.value)
+	elseif self.state == "rejected" then
+		handle_rejected(self.reason)
+	else
+		table.insert(self.handlers.fulfilled, handle_fulfilled)
+		table.insert(self.handlers.rejected, handle_rejected)
+		if type(on_finally) == "function" then
+			table.insert(self.handlers.finally, on_finally)
+		end
+	end
+	return promise
 end
 
 function Lunaris.Promise.prototype:catch(on_rejected)

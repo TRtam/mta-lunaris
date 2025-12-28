@@ -3,6 +3,7 @@ Lunaris = class()
 function Lunaris.prototype:constructor(driver, config)
 	self.driver = driver
 	self.debug = config.debug or false
+	self.timeout_ms = config.timeout
 	local options_parts = {}
 	local shared_options = {
 		"share",
@@ -67,8 +68,13 @@ function Lunaris.prototype:query(query_string, ...)
 		if self.debug then
 			print("[Lunaris] " .. sql_string)
 		end
-		dbQuery(function(query_handle)
-			local result = { dbPoll(query_handle, 0) }
+		local query_handle
+		local timer
+		query_handle = dbQuery(function(handle)
+			if isTimer(timer) then
+				killTimer(timer)
+			end
+			local result = { dbPoll(handle, 0) }
 			if result[1] == nil then
 				reject("Query failed result nil")
 			elseif result[1] == false then
@@ -77,6 +83,14 @@ function Lunaris.prototype:query(query_string, ...)
 				resolve(result)
 			end
 		end, self.connection, sql_string)
+
+		local timeout = self.timeout_ms or 10000
+		timer = setTimer(function()
+			if query_handle then
+				dbFree(query_handle)
+			end
+			reject("Query timed out after " .. timeout .. "ms")
+		end, timeout, 1)
 	end)
 end
 
