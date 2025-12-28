@@ -44,14 +44,27 @@ function Lunaris.Promise.prototype:constructor(executor)
 	self.state = "pending"
 	self.value = nil
 	self.handlers = { fulfilled = {}, rejected = {}, finally = {} }
-	local function resolve(value)
-		if self.state ~= "pending" then
-			return
-		end
-		if type(value) == "table" and value.next then
-			value:next(resolve, reject)
-			return
-		end
+	local success, result = pcall(executor, function(value)
+		self:resolve(value)
+	end, function(reason)
+		self:reject(reason)
+	end)
+	if not success then
+		self:reject(result)
+	end
+end
+
+function Lunaris.Promise.prototype:resolve(value)
+	if self.state ~= "pending" then
+		return
+	end
+	if type(value) == "table" and value.next then
+		value:next(function(value)
+			self:resolve(value)
+		end, function(reason)
+			self:reject(reason)
+		end)
+	else
 		self.state = "fulfilled"
 		self.value = value
 		for _, handler in ipairs(self.handlers.fulfilled) do
@@ -62,12 +75,21 @@ function Lunaris.Promise.prototype:constructor(executor)
 		end
 		self.handlers = {}
 	end
-	local function reject(reason)
-		if self.state ~= "pending" then
-			return
-		end
+end
+
+function Lunaris.Promise.prototype:reject(reason)
+	if self.state ~= "pending" then
+		return
+	end
+	if type(reason) == "table" and reason.next then
+		reason:next(function(value)
+			self:resolve(value)
+		end, function(reason)
+			self:reject(reason)
+		end)
+	else
 		self.state = "rejected"
-		self.value = reason
+		self.reason = reason
 		for _, handler in ipairs(self.handlers.rejected) do
 			handler(reason)
 		end
@@ -76,21 +98,17 @@ function Lunaris.Promise.prototype:constructor(executor)
 		end
 		self.handlers = {}
 	end
-	local success, result = pcall(executor, resolve, reject)
-	if not success then
-		reject(result)
-	end
 end
 
 function Lunaris.Promise.prototype:next(on_fulfilled, on_rejected, on_finally)
 	if type(on_fulfilled) ~= "function" then
-		on_fulfilled = function()
-			return true
+		on_fulfilled = function(value)
+			return value
 		end
 	end
 	if type(on_rejected) ~= "function" then
-		on_rejected = function()
-			return false
+		on_rejected = function(reason)
+			error(reason)
 		end
 	end
 	return Lunaris.Promise(function(resolve, reject)
@@ -112,7 +130,7 @@ function Lunaris.Promise.prototype:next(on_fulfilled, on_rejected, on_finally)
 		if self.state == "fulfilled" then
 			handle_fulfilled(self.value)
 		elseif self.state == "rejected" then
-			handle_rejected(self.value)
+			handle_rejected(self.reason)
 		else
 			table.insert(self.handlers.fulfilled, handle_fulfilled)
 			table.insert(self.handlers.rejected, handle_rejected)
@@ -131,13 +149,17 @@ function Lunaris.Promise.prototype:finally(on_finally)
 	return self:next(nil, nil, on_finally)
 end
 
+local TASKS_PROMISES = {}
+
 function Lunaris.async(executor)
 	return function(...)
 		local task = coroutine.create(function(...)
 			local returned = executor(...)
+			TASKS_PROMISES[task] = nil
 			return returned
 		end)
 		local promise, resolve, reject = Lunaris.Promise.deferred()
+		TASKS_PROMISES[task] = promise
 		local function step(...)
 			local success, result = coroutine._resume(task, ...)
 			if not success then
@@ -159,12 +181,48 @@ function Lunaris.async(executor)
 	end
 end
 
-function Lunaris.await(promise)
-	local result = coroutine.yield(promise)
-	if type(result) == "table" and result.next then
-		if result.state == "rejected" then
-			error(result.reason)
-		end
+function Lunaris.await(x)
+	if not coroutine.running() then
+		return x
 	end
-	return result
+	if type(x) == "table" and x.next then
+		local result = coroutine.yield(x)
+		if x.state == "rejected" then
+			error(x.reason)
+		end
+		return result
+	end
+	return x
+end
+
+function Lunaris.throw(e)
+	local promise = TASKS_PROMISES[coroutine.running()]
+	if promise then
+		promise:reject(e)
+	else
+		error(tostring(e))
+	end
+end
+
+function Lunaris.try(executor, catch, finally)
+	if coroutine.running() then
+		local promise = Lunaris.async(executor)():catch(Lunaris.async(catch))
+		if type(finally) == "function" then
+			finally = Lunaris.async(finally)
+			promise = promise:next(finally, finally)
+		end
+		return Lunaris.await(promise)
+	else
+		local success, result = pcall(executor)
+		if not success then
+			_, result = pcall(catch, result)
+		end
+		if type(finally) == "function" then
+			local finally_success, finally_result = pcall(finally)
+			if not finally_success then
+				result = finally_result
+			end
+		end
+		return result
+	end
 end
